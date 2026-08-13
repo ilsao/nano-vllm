@@ -165,6 +165,7 @@ class LLMEngine:
                 outputs[seq_id] = token_ids
                 pbar.update(1)
         pbar.close()
+        
         # sort the outputs by sequence ID to maintain the order of prompts
         # the type of outputs change from dict to list
         outputs = [outputs[seq_id] for seq_id in sorted(outputs.keys())]

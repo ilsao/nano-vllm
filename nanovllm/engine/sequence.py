@@ -18,7 +18,7 @@ class Sequence:
     def __init__(self, token_ids: list[int], sampling_params = SamplingParams()):
         self.seq_id = next(Sequence.counter)
         self.status = SequenceStatus.WAITING
-        self.token_ids = copy(token_ids)
+        self.token_ids = copy(token_ids)    # shallow copy
         self.last_token = token_ids[-1]
         self.num_tokens = len(self.token_ids)
         self.num_prompt_tokens = len(token_ids)
@@ -69,15 +69,20 @@ class Sequence:
         self.last_token = token_id
         self.num_tokens += 1
 
+    # Serialization methods for pickling 
     def __getstate__(self):
         last_state = self.last_token if not self.is_prefill else self.token_ids
         return (self.num_tokens, self.num_prompt_tokens, self.num_cached_tokens, self.num_scheduled_tokens, self.block_table, last_state)
 
+    # Deserialization methods for unpickling
     def __setstate__(self, state):
         self.num_tokens, self.num_prompt_tokens, self.num_cached_tokens, self.num_scheduled_tokens, self.block_table, last_state = state
         if isinstance(last_state, list):
+            # prefill phase, we have to restore the entire token_ids list
             self.token_ids = last_state
             self.last_token = self.token_ids[-1]
         else:
+            # decode phase, we only have to restore the last token 
+            # previous tokens are already in the kv cache
             self.token_ids = []
             self.last_token = last_state
