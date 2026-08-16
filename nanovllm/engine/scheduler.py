@@ -23,15 +23,34 @@ class Scheduler:
         self.waiting.append(seq)
 
     def schedule(self) -> tuple[list[Sequence], bool]:
+        """
+        Schedules sequences for processing.
+        It manages the allocation of blocks for sequences, 
+        handles preemption of running sequences,
+        and ensures that the number of scheduled tokens does not exceed 
+        the maximum allowed for the current batch. 
+        
+        return:
+            scheduled_seqs: list[Sequence]
+                A list of Sequence objects that have been scheduled for processing.
+            is_prefill: bool
+                A boolean flag indicating whether the current phase is prefill (True) 
+                or decode (False).
+        """
         scheduled_seqs = []
-        num_batched_tokens = 0
 
-        # prefill
+        # The number of tokens that have been scheduled in the current batch.
+        num_batched_tokens = 0  
+
+        # prefill (kv cache is still empty)
         while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
             seq = self.waiting[0]
+            # The number of tokens that can be scheduled in this batch.
             remaining = self.max_num_batched_tokens - num_batched_tokens
             if remaining == 0:
                 break
+
+            # Calculate the number of tokens that can be scheduled for this sequence.
             if not seq.block_table:
                 num_cached_blocks = self.block_manager.can_allocate(seq)
                 if num_cached_blocks == -1:
@@ -39,12 +58,22 @@ class Scheduler:
                 num_tokens = seq.num_tokens - num_cached_blocks * self.block_size
             else:
                 num_tokens = seq.num_tokens - seq.num_cached_tokens
-            if remaining < num_tokens and scheduled_seqs:  # only allow chunked prefill for the first seq
+            
+            # If the remaining tokens in this batch < num_tokens (the number of tokens that
+            # can be scheduled for this sequence), we can only schedule a part of the sequence. 
+            # Else, we can schedule the whole sequence.
+            # For simplicity, we only allow chunked prefill for the first sequence 
+            # in the waiting queue (else it will cause some complicate issues). 
+            if remaining < num_tokens and scheduled_seqs: 
                 break
+            
             if not seq.block_table:
                 self.block_manager.allocate(seq, num_cached_blocks)
+                
             seq.num_scheduled_tokens = min(num_tokens, remaining)
             num_batched_tokens += seq.num_scheduled_tokens
+            
+            # The sequence is finished prefill
             if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:
                 seq.status = SequenceStatus.RUNNING
                 self.waiting.popleft()
@@ -57,10 +86,14 @@ class Scheduler:
         # decode
         while self.running and len(scheduled_seqs) < self.max_num_seqs:
             seq = self.running.popleft()
+            # Cannot append a new block, try to preempt
             while not self.block_manager.can_append(seq):
                 if self.running:
+                    # Preempt the last running sequence
                     self.preempt(self.running.pop())
                 else:
+                    # If there are no other running sequences to preempt,
+                    # we have to preempt the current sequence itself.
                     self.preempt(seq)
                     break
             else:
@@ -68,11 +101,19 @@ class Scheduler:
                 seq.is_prefill = False
                 self.block_manager.may_append(seq)
                 scheduled_seqs.append(seq)
+
         assert scheduled_seqs
         self.running.extendleft(reversed(scheduled_seqs))
         return scheduled_seqs, False
 
     def preempt(self, seq: Sequence):
+        """
+        Preempt a running sequence and move it back to the waiting queue.
+        
+        param:
+            seq: Sequence
+                The sequence to be preempted and moved back to the waiting queue.
+        """
         seq.status = SequenceStatus.WAITING
         seq.is_prefill = True
         self.block_manager.deallocate(seq)
@@ -97,9 +138,15 @@ class Scheduler:
             self.block_manager.hash_blocks(seq)
             seq.num_cached_tokens += seq.num_scheduled_tokens
             seq.num_scheduled_tokens = 0
+
+            # If the prefill phase is still ongoing, we skip the post-processing
             if is_prefill and seq.num_cached_tokens < seq.num_tokens:
                 continue
+
+            # append the generated token
             seq.append_token(token_id)
+
+            # If eos is generated or the maximum number of tokens is reached
             if (not seq.ignore_eos and token_id == self.eos) or seq.num_completion_tokens == seq.max_tokens:
                 seq.status = SequenceStatus.FINISHED
                 self.block_manager.deallocate(seq)

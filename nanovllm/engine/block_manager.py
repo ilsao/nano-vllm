@@ -56,6 +56,17 @@ class BlockManager:
         self.free_block_ids.append(block_id)
 
     def can_allocate(self, seq: Sequence) -> int:
+        """
+        Returns whether the sequence can be allocated in the cache. 
+        
+        param:
+            seq: Sequence
+                The sequence to check for allocation.
+        return:
+            num_cached_blocks: int
+                The number of blocks that can be cached for the sequence.
+                Returns -1 if the sequence cannot be allocated due to insufficient free blocks.
+        """
         h = -1
         num_cached_blocks = 0
         num_new_blocks = seq.num_blocks
@@ -108,6 +119,13 @@ class BlockManager:
             seq.block_table.append(self._allocate_block())
 
     def hash_blocks(self, seq: Sequence):
+        """
+        Hashes the blocks of a sequence and updates the block cache accordingly.
+        
+        param:
+            seq: Sequence
+                The sequence whose blocks are to be hashed and cached.
+        """
         start = seq.num_cached_tokens // self.block_size
         end = (seq.num_cached_tokens + seq.num_scheduled_tokens) // self.block_size
         if start == end: return

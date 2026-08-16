@@ -100,6 +100,7 @@ class LLMEngine:
                 indicates the number of sequences processed in the decode phase.
         """
         seqs, is_prefill = self.scheduler.schedule()
+
         # If we are in the prefill phase, count the number of scheduled tokens.
         # If we are in the decode phase, return the negative number of sequences
         # to indicate that we are decoding.
@@ -107,9 +108,11 @@ class LLMEngine:
         # we only generate one token per sequence in the decode phase
         num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
         token_ids = self.model_runner.call("run", seqs, is_prefill)
+
         # Concatenate the generated token IDs to the sequences, 
         # update their status, and manage the block cache.
         self.scheduler.postprocess(seqs, token_ids, is_prefill)
+
         # Only return the finished seqs
         outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]
         return outputs, num_tokens
