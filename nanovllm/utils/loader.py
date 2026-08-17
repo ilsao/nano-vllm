@@ -10,6 +10,17 @@ def default_weight_loader(param: nn.Parameter, loaded_weight: torch.Tensor):
 
 
 def load_model(model: nn.Module, path: str):
+    """ 
+    Load the model from the given path. 
+    It looks for files with the .safetensors extension in the specified 
+    directory and loads the weights into the corresponding parameters of the model.
+    
+    param:
+        model: nn.Module
+            The model to load weights into.
+        path: str
+            The path to the directory containing the model weights.
+    """
     packed_modules_mapping = getattr(model, "packed_modules_mapping", {})
     for file in glob(os.path.join(path, "*.safetensors")):
         with safe_open(file, "pt", "cpu") as f:
